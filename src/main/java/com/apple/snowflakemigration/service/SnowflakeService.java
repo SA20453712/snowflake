@@ -246,14 +246,6 @@ public class SnowflakeService {
         return tableName.isPresent() ? tableName.get() : "";
     }
 
-    private String getVertexRefTable(String vertexValue, Map<String,List<String>> vertexIdsMap) {
-        Optional<String> tableName = vertexIdsMap.entrySet().stream()
-                .filter(entry -> entry.getValue().contains(vertexValue))
-                .map(Map.Entry::getKey)
-                .findFirst();
-
-        return tableName.isPresent() ? tableName.get() : "";
-    }
 
     private String[] getColumnsToBeCreated(List<JsonNode> jsonObjects) {
         List<String[]> columnsArray = new ArrayList<>();
@@ -272,90 +264,5 @@ public class SnowflakeService {
     }
 
 
-    public Map<String,Map<String,String>> getRefTables(){
-        s3Utils.getS3Client();
-        Map<String, List<String>> vertexIdsMap = getVertexIds();
-        Map<String,Map<String,String>> respone = new ConcurrentHashMap<>();
-        List<S3Object> edgeFiles = s3Utils.listFiles("edges");
-        log.info("S3ToSnowflake.exportS3ObjectsToMySQL(): edges files size={}", edgeFiles.size());
-        Map<String, List<JsonNode>> fileNameJsonObjectsMap = getJsonObjectsFromFilesWithSameName(edgeFiles, "edges/");
 
-        edgeTableCreationExecutor = new ThreadPoolExecutor(50,
-                50, 60, TimeUnit.SECONDS, edgeTableCreationQueue);
-        List<Future<?>> futureResp = new ArrayList<>();
-        for (Map.Entry<String, List<JsonNode>> entry : fileNameJsonObjectsMap.entrySet()) {
-            futureResp.add(edgeTableCreationExecutor.submit(() -> {
-                log.info("S3ToSnowflake.createEdgeTables(): file name = {}, json objects size = {}", entry.getKey(), entry.getValue().size());
-                List<JsonNode> jsonObjects = entry.getValue();
-                String[] columns = Arrays.stream(getColumnsToBeCreated(jsonObjects))
-                        .map(column -> column.equalsIgnoreCase("from") ? "fromVertex" : column)
-                        .map(column -> column.equalsIgnoreCase("to") ? "toVertex" : column)
-                        .toArray(String[]::new);
-                String[] values = jsonUtils.parseJsonValues(jsonObjects.get(0));
-                String fromVertex = "";
-                String toVertex = "";
-                for (int i = 0; i < columns.length; i++) {
-                    if (columns[i].equalsIgnoreCase("fromVertex")) {
-                        fromVertex = values[i];
-                    } else if (columns[i].equalsIgnoreCase("toVertex")) {
-                        toVertex = values[i];
-                    }
-                }
-                Map<String,String> map = new HashMap<>();
-                String fromVertexRefTable = getVertexRefTable(fromVertex,vertexIdsMap);
-                String toVertexRefTable = getVertexRefTable(toVertex,vertexIdsMap);
-                map.put("fromVertexRefTable",fromVertexRefTable);
-                map.put("toVertexRefTable",toVertexRefTable);
-                respone.put(entry.getKey(),map);
-                log.info("S3ToSnowflake.createEdgeTables(): edge table ={}, fromVertexRefTable={},toVertexRefTable={}", fromVertexRefTable, toVertexRefTable);
-            }));
-        }
-        return respone;
-    }
-
-    public Map<String, List<String>> getVertexIds() {
-        Map<String, Map<String, String>> response = new HashMap<>();
-        Map<String, List<String>> vertexIdsMap = new HashMap<>();
-        //s3Utils.getS3Client();
-        // List files from vertex and edges folders
-        List<S3Object> vertexFiles = s3Utils.listFiles("nodes");
-        log.info("S3ToSnowflake.exportS3ObjectsToMySQL(): vertex files size ={}", vertexFiles.size());
-        Map<String, List<JsonNode>> fileNameJsonObjectsMap = getJsonObjectsFromFilesWithSameName(vertexFiles, "nodes/");
-        List<Future<?>> futureResp = new ArrayList<>();
-        List<String> ids = new ArrayList<>();
-        vertexTableCreationExecutor = new ThreadPoolExecutor(50,
-                50, 60, TimeUnit.SECONDS, vertexTableCreationQueue);
-        for (Map.Entry<String, List<JsonNode>> entry : fileNameJsonObjectsMap.entrySet()) {
-            String vertexFileName = entry.getKey();
-            futureResp.add(vertexTableCreationExecutor.submit(() -> {
-                log.info("S3ToSnowflake.createVertexTables(): file name = {}, json objects size = {}", entry.getKey(), entry.getValue().size());
-                List<JsonNode> jsonObjects = entry.getValue();
-                String[] columns = getColumnsToBeCreated(jsonObjects);
-
-                jsonObjects.stream().forEach(jsonNode -> {
-                    String[] finalColumns = columns;
-                    String[] values = jsonUtils.parseJsonValues(jsonNode);
-                    for (int i = 0; i < columns.length; i++) {
-                        if (columns[i].equals("id")) {
-                            ids.add(values[i]);
-                            break;
-                        }
-                    }
-
-                });
-            }));
-            if (vertexIdsMap.containsKey(vertexFileName)) {
-                List<String> addedIds = vertexIdsMap.get(vertexFileName);
-                addedIds.addAll(ids);
-                vertexIdsMap.put(vertexFileName, addedIds);
-            } else {
-                vertexIdsMap.put(vertexFileName, ids);
-            }
-
-        }
-        vertexTableCreationExecutor.shutdown();
-        return vertexIdsMap;
-
-
-    }
 }

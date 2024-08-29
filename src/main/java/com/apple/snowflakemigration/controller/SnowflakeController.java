@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 @RestController
+@RequestMapping("/snowflake")
 public class SnowflakeController {
 
     @Autowired
@@ -26,8 +27,4 @@ public class SnowflakeController {
         return snowflakeService.isTableExists(snowflakeProperties,tableName);
     }
 
-    @GetMapping("/getRefTables")
-    public Map<String, Map<String,String>> getRefTables(){
-        return snowflakeService.getRefTables();
-    }
 }
